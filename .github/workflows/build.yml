@@ -5,9 +5,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+      - name: Buka zip sumber asli
+        run: unzip -q xiaozhi-esp32-s3-n16r8-cam-st7789-main.zip
       - name: Patch kompatibilitas IDF 6
+        working-directory: xiaozhi-esp32-s3-n16r8-cam-st7789-main
         run: |
           python3 - <<'EOF'
           import re
@@ -33,10 +34,11 @@ jobs:
           open(p,'w',encoding='utf-8').write(s)
           EOF
       - name: Build
+        working-directory: xiaozhi-esp32-s3-n16r8-cam-st7789-main
         run: |
           docker run --rm -v "$PWD:/project" -w /project -e HOME=/tmp espressif/idf:v6.0.2 \
             bash -c "git config --global --add safe.directory '*' && python3 scripts/build.py esp32s3-cam-st7789 --name esp32s3-cam-st7789-240x280"
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
-          path: releases/
+          path: xiaozhi-esp32-s3-n16r8-cam-st7789-main/releases/
