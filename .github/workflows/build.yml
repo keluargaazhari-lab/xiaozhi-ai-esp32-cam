@@ -7,14 +7,34 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - name: Sisakan hanya board kamu
+      - name: Patch kompatibilitas IDF 6
         run: |
-          cd main/boards
-          find . -mindepth 1 -maxdepth 1 ! -name common ! -name esp32s3-cam-st7789 -exec rm -rf {} +
-          ls
+          python3 - <<'EOF'
+          import re
+          p='main/chronchi/chronchi_ble.cpp'
+          s=open(p,encoding='utf-8').read()
+          if '<esp_timer.h>' not in s:
+              s=s.replace('#include <esp_log.h>','#include <esp_log.h>\n#include <esp_timer.h>',1)
+          open(p,'w',encoding='utf-8').write(s)
+          p='main/boards/esp32s3-cam-st7789/esp32s3_cam_st7789.cc'
+          s=open(p,encoding='utf-8').read()
+          pat=re.compile(r'esp_lcd_panel_io_i2c_config_t io_config = \{.*?\n            \};',re.S)
+          new='''esp_lcd_panel_io_i2c_config_t io_config = {};
+              io_config.dev_addr = 0x3C;
+              io_config.control_phase_bytes = 1;
+              io_config.dc_bit_offset = 6;
+              io_config.lcd_cmd_bits = 8;
+              io_config.lcd_param_bits = 8;
+              io_config.flags.dc_low_on_data = 0;
+              io_config.flags.disable_control_phase = 0;
+              io_config.scl_speed_hz = 400 * 1000;'''
+          s,n=pat.subn(new,s,count=1)
+          print('replaced',n)
+          open(p,'w',encoding='utf-8').write(s)
+          EOF
       - name: Build
         run: |
-          docker run --rm -v "$PWD:/project" -w /project -e HOME=/tmp espressif/idf:v6.0.2\
+          docker run --rm -v "$PWD:/project" -w /project -e HOME=/tmp espressif/idf:v6.0.2 \
             bash -c "git config --global --add safe.directory '*' && python3 scripts/build.py esp32s3-cam-st7789 --name esp32s3-cam-st7789-240x280"
       - uses: actions/upload-artifact@v4
         with:
