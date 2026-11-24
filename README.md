@@ -1,10 +1,25 @@
+# XiaoZhi AI & Chronchi ESP32-S3 (N16R8 + CAM + ST7789)
+
+Firmware khusus untuk **ESP32-S3 N16R8** (16MB Flash, 8MB Octal PSRAM) dengan modul kamera OV2640, layar ST7789 (240x280 / 240x320), audio codec ES8311, serta mode ganda: **XiaoZhi Voice Assistant** dan **Chronchi Smartwatch Companion**.
+
+### 🌟 Fitur Utama
+- **Dual UI Theme (XiaoZhi Mode):**
+  - **Thema 1 (Default Robot):** Background & emoji kustom terkunci ke `assets.bin` dari xiaozhi.me. Tampilan default putih elegan.
+  - **Thema 2 (WhatsApp Bubble Chat):** Layout modern bubble chat WhatsApp, mendukung ganti warna background lewat perintah suara.
+  - *Ganti tema kapan saja:* Klik 2x tombol BOOT atau perintah suara *"ganti ke tema 2"*.
+- **Dual Device Mode:**
+  - **Mode XiaoZhi:** Voice AI assistant (Qwen / DeepSeek), YouTube music streaming visualizer, kamera visual AI analysis, MCP tools.
+  - **Mode Chronchi:** Smartwatch BLE companion via aplikasi Chronos (Sync Jam, Notifikasi HP, Cuaca, Media Player kontrol musik HP).
+  - *Beralih mode:* Klik 3x tombol BOOT (di XiaoZhi) atau Klik 2x tombol Down (di Chronchi).
+- **Audio & Kamera Stabil:** ES8311 Full-duplex simplex I2S codec, JPEG PSRAM capacity auto-scaling, proteksi upload HTTP aman.
+
+---
+
 # An MCP-based Chatbot
 
 (English | [中文](README_zh.md) | [日本語](README_ja.md))
 
 ## Introduction
-
-📖 [XiaoZhi AI Guides & Help](https://docs.xiaozhi.me/en/)
 
 👉 [Human: Give AI a camera vs AI: Instantly finds out the owner hasn't washed hair for three days【bilibili】](https://www.bilibili.com/video/BV1bpjgzKEhd/)
 
@@ -16,10 +31,10 @@ As a voice interaction entry, the XiaoZhi AI chatbot leverages the AI capabiliti
 
 ## Recent Updates
 
-- The project now requires ESP-IDF v6.0.1 or later. [ESP-IDF `release/v6.1`](https://github.com/espressif/esp-idf/tree/release/v6.1) is the recommended SDK branch. ESP-IDF 5.x is no longer supported. The current matrix contains 171 variants; ESP32-S31 builds require IDF 6.1 or later.
+- The mainline now targets ESP-IDF v6.0 or later, with v6.0.2 as the preferred stable SDK. The previous 157-variant baseline was validated on ESP-IDF v6.0.1; the current matrix contains 171 variants, of which 170 support IDF 6.0.x and the ESP32-S31 variant requires IDF 6.1 or later.
 - MQTT and BluFi cryptographic code has migrated to PSA Crypto. IDF 6 component splits and third-party dependency compatibility have also been addressed.
 - Audio pipeline concurrency, MQTT/UDP packet validation, and release-matrix selection have been hardened.
-- ESP32-P4 Rev1 and Rev3 are both supported on IDF 6 with ESP-SR 2.4.7.
+- ESP-IDF v5.5 is retained only for documented legacy boards. ESP32-P4 Rev1 and Rev3 are both supported on IDF 6 with ESP-SR 2.4.7; see the [ESP-IDF 6.0 Migration Guide](docs/esp-idf-6-migration.md) for full compatibility and board-validation details.
 
 ### Features Implemented
 
@@ -41,9 +56,9 @@ As a voice interaction entry, the XiaoZhi AI chatbot leverages the AI capabiliti
 
 ### Breadboard DIY Practice
 
-Follow the step-by-step breadboard tutorial:
+See the Feishu document tutorial:
 
-👉 [ESP32-S3 Breadboard Tutorial](https://docs.xiaozhi.me/en/hardware/breadboard-esp32-s3.html)
+👉 ["XiaoZhi AI Chatbot Encyclopedia"](https://ccnphfhqs21z.feishu.cn/wiki/F5krwD16viZoF0kKkvDcrZNYnhb?from=from_copylink)
 
 Breadboard demo:
 
@@ -111,21 +126,19 @@ For beginners, it is recommended to use the firmware that can be flashed without
 
 The firmware connects to the official [xiaozhi.me](https://xiaozhi.me) server by default. Personal users can register an account to use the Qwen real-time model for free.
 
-👉 [Beginner's Firmware Flashing Guide](https://docs.xiaozhi.me/en/firmware/flashing.html)
+👉 [Beginner's Firmware Flashing Guide](https://ccnphfhqs21z.feishu.cn/wiki/Zpz4wXBtdimBrLk25WdcXzxcnNS)
 
 ### Development Environment
 
 - Cursor or VSCode
-- Install the ESP-IDF plugin. The minimum SDK is [ESP-IDF v6.0.1](https://github.com/espressif/esp-idf/releases/tag/v6.0.1); [ESP-IDF `release/v6.1`](https://github.com/espressif/esp-idf/tree/release/v6.1) is recommended. ESP-IDF 5.x is not supported.
+- Install the ESP-IDF plugin. [ESP-IDF v6.0.2](https://github.com/espressif/esp-idf/releases/tag/v6.0.2) is preferred; use a stable v6.0 or later release. ESP-IDF v5.5.2 is retained only for legacy board compatibility
 - Linux is better than Windows for faster compilation and fewer driver issues
 - This project uses Google C++ code style, please ensure compliance when submitting code
 
-Use the `release/v6.1` branch rather than the `v6.1` release tag: an ESP32-C3 Wi-Fi initialization failure with that tag is reported in [#2344](https://github.com/78/xiaozhi-esp32/issues/2344). After switching SDK revisions, run `git submodule update --init --recursive` in the ESP-IDF directory, source its `export.sh`, and run `idf.py fullclean` in this project before rebuilding.
-
 ### Developer Documentation
 
+- [ESP-IDF 6.0 Migration Guide](docs/esp-idf-6-migration.md) - SDK compatibility, component changes, legacy hardware support, and board validation status
 - [Custom Board Guide](docs/custom-board.md) - Learn how to create custom boards for XiaoZhi AI
-- [OTA Configuration, Activation, and Firmware Updates](docs/ota.md) - Device bootstrap HTTP API and protocol capability reporting
 - [MCP Protocol IoT Control Usage](docs/mcp-usage.md) - Learn how to control IoT devices via MCP protocol
 - [MCP Protocol Interaction Flow](docs/mcp-protocol.md) - Device-side MCP protocol implementation
 - [MQTT + UDP Hybrid Communication Protocol Document](docs/mqtt-udp.md)
@@ -164,7 +177,7 @@ This is an open-source ESP32 project, released under the MIT license, allowing a
 
 We hope this project helps everyone understand AI hardware development and apply rapidly evolving large language models to real hardware devices.
 
-If you have any ideas or suggestions, please feel free to raise Issues or join our [Discord](https://discord.gg/C759fGMBcZ) or QQ group: 1034828326
+If you have any ideas or suggestions, please feel free to raise Issues or join our [Discord](https://discord.gg/C759fGMBcZ) or QQ group: 1095994019
 
 ## Star History
 

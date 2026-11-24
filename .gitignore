@@ -16,5 +16,10 @@ main/mmap_generate_emoji.h
 .cache
 *.pyc
 *.bin
+*.wav
+scratch/
+test.txt
+gpio_dataset.json
+.commandcode/
 mmap_generate_*.h
 .clangd
