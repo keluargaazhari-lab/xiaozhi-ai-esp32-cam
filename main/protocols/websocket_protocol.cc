@@ -79,6 +79,11 @@ void WebsocketProtocol::CloseAudioChannel(bool send_goodbye) {
 bool WebsocketProtocol::OpenAudioChannel() {
     Settings settings("websocket", false);
     std::string url = settings.GetString("url");
+    if (url.empty()) {
+        Settings wifi_settings("wifi", false);
+        std::string domain = wifi_settings.GetString("server_domain", "xiaozhiscig.biz.id");
+        url = "wss://" + domain + "/api/v1/ws";
+    }
     std::string token = settings.GetString("token");
     int version = settings.GetInt("version");
     if (version != 0) {
@@ -103,7 +108,16 @@ bool WebsocketProtocol::OpenAudioChannel() {
     }
     websocket_->SetHeader("Protocol-Version", std::to_string(version_).c_str());
     websocket_->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+    websocket_->SetHeader("X-Device-Mac", SystemInfo::GetMacAddress().c_str());
+    websocket_->SetHeader("X-Chip-Type", "esp32-s3");
+    websocket_->SetHeader("X-Device-Chip", "esp32-s3");
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+
+    Settings sys_settings("system", false);
+    std::string voice_lang = sys_settings.GetString("voice_lang", "en-US");
+    if (!voice_lang.empty()) {
+        websocket_->SetHeader("Accept-Language", voice_lang.c_str());
+    }
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
         if (binary) {
@@ -158,17 +172,6 @@ bool WebsocketProtocol::OpenAudioChannel() {
         last_incoming_time_ = std::chrono::steady_clock::now();
     });
 
-    // Callbacks run on the transport's receive task, which on 4G modems is the
-    // AT event task and cannot send, so the Pong is sent from the main task.
-    std::weak_ptr<WebSocket> weak_websocket = websocket_;
-    websocket_->OnPing([weak_websocket](const char* data, size_t len) {
-        Application::GetInstance().Schedule([weak_websocket, payload = std::string(data, len)]() {
-            if (auto websocket = weak_websocket.lock()) {
-                websocket->SendPong(payload.data(), payload.size());
-            }
-        });
-    });
-
     websocket_->OnDisconnected([this]() {
         ESP_LOGI(TAG, "Websocket disconnected");
         if (on_audio_channel_closed_ != nullptr) {
@@ -177,10 +180,9 @@ bool WebsocketProtocol::OpenAudioChannel() {
     });
 
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
-    if (auto connected = websocket_->Connect(url.c_str()); !connected) {
-        ESP_LOGE(TAG, "Failed to connect to websocket server: %s",
-                 connected.error().ToString().c_str());
-        SetError(Lang::Strings::SERVER_NOT_CONNECTED, url);
+    if (!websocket_->Connect(url.c_str())) {
+        ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
+        SetError(Lang::Strings::SERVER_NOT_CONNECTED);
         return false;
     }
 
@@ -212,8 +214,21 @@ std::string WebsocketProtocol::GetHelloMessage() {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "hello");
     cJSON_AddNumberToObject(root, "version", version_);
-    AddClientCapabilities(root);
+    cJSON* features = cJSON_CreateObject();
+#if CONFIG_USE_SERVER_AEC
+    cJSON_AddBoolToObject(features, "aec", true);
+#endif
+    cJSON_AddBoolToObject(features, "mcp", true);
+    cJSON_AddItemToObject(root, "features", features);
+    AddTextFontCapabilities(root);
     cJSON_AddStringToObject(root, "transport", "websocket");
+
+    Settings sys_settings("system", false);
+    std::string voice_lang = sys_settings.GetString("voice_lang", "en-US");
+    if (!voice_lang.empty()) {
+        cJSON_AddStringToObject(root, "language", voice_lang.c_str());
+    }
+
     cJSON* audio_params = cJSON_CreateObject();
     cJSON_AddStringToObject(audio_params, "format", "opus");
     cJSON_AddNumberToObject(audio_params, "sample_rate", 16000);
