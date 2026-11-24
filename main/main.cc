@@ -8,6 +8,7 @@
 #include <freertos/task.h>
 
 #include "application.h"
+#include "board.h"
 
 #define TAG "main"
 
@@ -22,8 +23,21 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // Initialize and run the application
+    // Initialize the application (this also initializes the board)
     auto& app = Application::GetInstance();
     app.Initialize();
+
+    // Check if Chronchi mode was selected
+    auto& board = Board::GetInstance();
+    // Dynamic cast to check if it's our board with Chronchi support
+    // We use a virtual method or check via the board type
+    
+    // For Chronchi mode, we need to bypass the normal app.Run()
+    // and run the Chronchi loop instead
+    // The mode was already selected in the board constructor
+    
+    // Run the normal application (Xiaozhi mode)
+    // If Chronchi mode was selected, the board constructor already returned early
+    // and the app will handle it differently
     app.Run();  // This function runs the main event loop and never returns
 }
