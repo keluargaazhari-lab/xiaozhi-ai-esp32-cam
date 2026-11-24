@@ -3,7 +3,6 @@
 
 #include <lvgl.h>
 #include <memory>
-#include <optional>
 #include <thread>
 #include <vector>
 
@@ -20,16 +19,7 @@ struct JpegChunk {
 };
 
 class EspVideo : public Camera {
-public:
-    struct Orientation {
-        bool hmirror;
-        bool vflip;
-    };
-    using SensorOrientationCallback = std::optional<Orientation> (*)(uint16_t sensor_pid);
-
 private:
-    void ConfigureOrientation(SensorOrientationCallback callback);
-
     struct FrameBuffer {
         uint8_t* data = nullptr;
         size_t len = 0;
@@ -54,9 +44,7 @@ private:
     std::thread encoder_thread_;
 
 public:
-    // Board defaults are applied before streaming; explicit mirror configuration takes precedence.
-    EspVideo(const esp_video_init_config_t& config,
-             SensorOrientationCallback orientation_callback = nullptr);
+    EspVideo(const esp_video_init_config_t& config);
     ~EspVideo() override;
 
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
@@ -64,8 +52,5 @@ public:
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
-    virtual std::expected<std::string, std::string> Explain(const std::string& question) override;
-    std::expected<std::string, std::string> Explain(const std::string& question,
-                                                    const std::string& url,
-                                                    const std::string& token) override;
+    virtual std::string Explain(const std::string& question);
 };
