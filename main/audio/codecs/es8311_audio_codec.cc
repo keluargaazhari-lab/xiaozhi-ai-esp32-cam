@@ -1,8 +1,11 @@
 #include "es8311_audio_codec.h"
 
 #include <esp_log.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+
+extern "C" void esp_brownout_disable(void);
 
 #define TAG "Es8311AudioCodec"
 
@@ -16,7 +19,13 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     output_sample_rate_ = output_sample_rate;
     pa_pin_ = pa_pin;
     pa_inverted_ = pa_inverted;
-    input_gain_ = 30;
+    input_gain_ = 18;
+
+    if (pa_pin_ != GPIO_NUM_NC) {
+        gpio_reset_pin(pa_pin_);
+        gpio_set_direction(pa_pin_, GPIO_MODE_OUTPUT);
+        gpio_set_level(pa_pin_, pa_inverted_ ? 1 : 0);
+    }
 
     assert(input_sample_rate_ == output_sample_rate_);
     CreateDuplexChannels(mclk, bclk, ws, dout, din);
@@ -31,9 +40,10 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     assert(data_if_ != NULL);
 
     // Output
+    uint8_t i2c_addr = (es8311_addr <= 0x1F) ? (es8311_addr << 1) : es8311_addr;
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = i2c_port,
-        .addr = es8311_addr,
+        .addr = i2c_addr,
         .bus_handle = i2c_master_handle,
     };
     ctrl_if_ = audio_codec_new_i2c_ctrl(&i2c_cfg);
@@ -51,6 +61,8 @@ Es8311AudioCodec::Es8311AudioCodec(void* i2c_master_handle, i2c_port_t i2c_port,
     es8311_cfg.use_mclk = use_mclk;
     es8311_cfg.hw_gain.pa_voltage = 5.0;
     es8311_cfg.hw_gain.codec_dac_voltage = 3.3;
+    es8311_cfg.hw_gain.pa_gain = 0.0;
+    es8311_cfg.mclk_div = 256;
     es8311_cfg.pa_reverted = pa_inverted_;
     codec_if_ = es8311_codec_new(&es8311_cfg);
 
@@ -66,10 +78,14 @@ void Es8311AudioCodec::ResetCodec() {
     // recommended by the initialization guide. Normal codec initialization
     // releases the reset and starts the state machine.
     uint8_t reset_value = 0x1F;
-    ESP_ERROR_CHECK(static_cast<esp_err_t>(
-        ctrl_if_->write_reg(ctrl_if_, 0x00, 1, &reset_value, 1)));
-    vTaskDelay(pdMS_TO_TICKS(5));
-    ESP_LOGI(TAG, "ES8311 software reset complete");
+    esp_err_t ret = static_cast<esp_err_t>(
+        ctrl_if_->write_reg(ctrl_if_, 0x00, 1, &reset_value, 1));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "ES8311 software reset write returned 0x%x", ret);
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        ESP_LOGI(TAG, "ES8311 software reset complete");
+    }
 }
 
 Es8311AudioCodec::~Es8311AudioCodec() {
@@ -106,9 +122,10 @@ void Es8311AudioCodec::UpdateDeviceState() {
         esp_codec_dev_delete(dev_);
         dev_ = nullptr;
     }
-    if (pa_pin_ != GPIO_NUM_NC) {
-        int level = output_enabled_ ? 1 : 0;
-        gpio_set_level(pa_pin_, pa_inverted_ ? !level : level);
+    if (pa_pin_ != GPIO_NUM_NC && !pa_active_) {
+        esp_brownout_disable();
+        gpio_set_level(pa_pin_, pa_inverted_ ? 1 : 0);
+        ESP_LOGI(TAG, "PA pin %d initialized in muted standby", pa_pin_);
     }
 }
 
@@ -130,10 +147,10 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
-#if SOC_I2S_HW_VERSION_2
-            .ext_clk_freq_hz = 0,
-#endif
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2    
+				.ext_clk_freq_hz = 0,
+			#endif
         },
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
@@ -143,11 +160,11 @@ void Es8311AudioCodec::CreateDuplexChannels(gpio_num_t mclk, gpio_num_t bclk, gp
             .ws_width = I2S_DATA_BIT_WIDTH_16BIT,
             .ws_pol = false,
             .bit_shift = true,
-#if SOC_I2S_HW_VERSION_2
-            .left_align = true,
-            .big_endian = false,
-            .bit_order_lsb = false
-#endif
+            #ifdef   I2S_HW_VERSION_2   
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
         },
         .gpio_cfg = {
             .mclk = mclk,
@@ -203,15 +220,32 @@ void Es8311AudioCodec::EnableOutput(bool enable) {
 }
 
 int Es8311AudioCodec::Read(int16_t* dest, int samples) {
-    if (input_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t)));
+    if (pa_active_ && pa_pin_ != GPIO_NUM_NC) {
+        if (esp_timer_get_time() - last_write_time_ > 350000) { // 350ms idle after playback
+            gpio_set_level(pa_pin_, pa_inverted_ ? 1 : 0);
+            pa_active_ = false;
+        }
+    }
+    if (input_enabled_ && dev_ != nullptr) {
+        int ret = esp_codec_dev_read(dev_, (void*)dest, samples * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            return 0;
+        }
     }
     return samples;
 }
 
 int Es8311AudioCodec::Write(const int16_t* data, int samples) {
-    if (output_enabled_) {
-        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t)));
+    if (output_enabled_ && dev_ != nullptr) {
+        if (pa_pin_ != GPIO_NUM_NC && !pa_active_) {
+            gpio_set_level(pa_pin_, pa_inverted_ ? 0 : 1);
+            pa_active_ = true;
+        }
+        last_write_time_ = esp_timer_get_time();
+        int ret = esp_codec_dev_write(dev_, (void*)data, samples * sizeof(int16_t));
+        if (ret != ESP_CODEC_DEV_OK) {
+            return 0;
+        }
     }
     return samples;
 }

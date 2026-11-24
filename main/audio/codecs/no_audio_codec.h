@@ -10,6 +10,14 @@
 class NoAudioCodec : public AudioCodec {
 protected:
     std::mutex data_if_mutex_;
+    int mic_shift_ = 13;
+    bool mic_is_stereo_ = false;
+    bool has_left_mic_ = false;
+    bool has_right_mic_ = false;
+    std::string mic_mode_ = "primary";
+    int detect_frames_ = 30;
+    std::vector<int32_t> tx_buffer_;
+    std::vector<int32_t> rx_buffer_;
 
     virtual int Write(const int16_t* data, int samples) override;
     virtual int Read(int16_t* dest, int samples) override;
@@ -17,6 +25,9 @@ protected:
     virtual void EnableOutput(bool enable) override;
 
 public:
+    virtual void Start() override;
+    virtual bool is_dual_mic() const override { return mic_mode_ == "blend" && mic_is_stereo_; }
+    virtual int ReadStereo(int16_t* left_dest, int16_t* right_dest, int samples) override;
     virtual ~NoAudioCodec();
 };
 

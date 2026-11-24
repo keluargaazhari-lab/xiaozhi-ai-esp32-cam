@@ -1,4 +1,5 @@
 #include "no_audio_codec.h"
+#include "settings.h"
 
 #include <esp_log.h>
 #include <cmath>
@@ -36,10 +37,10 @@ NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
-#if SOC_I2S_HW_VERSION_2
-            .ext_clk_freq_hz = 0,
-#endif
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2
+				.ext_clk_freq_hz = 0,
+			#endif
 
         },
         .slot_cfg = {
@@ -50,11 +51,11 @@ NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-#if SOC_I2S_HW_VERSION_2
-            .left_align = true,
-            .big_endian = false,
-            .bit_order_lsb = false
-#endif
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
 
         },
         .gpio_cfg = {
@@ -97,10 +98,10 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
-#if SOC_I2S_HW_VERSION_2
-            .ext_clk_freq_hz = 0,
-#endif
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2
+				.ext_clk_freq_hz = 0,
+			#endif
 
         },
         .slot_cfg = {
@@ -111,11 +112,11 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-#if SOC_I2S_HW_VERSION_2
-            .left_align = true,
-            .big_endian = false,
-            .bit_order_lsb = false
-#endif
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
 
         },
         .gpio_cfg = {
@@ -166,25 +167,25 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
-#if SOC_I2S_HW_VERSION_2
-            .ext_clk_freq_hz = 0,
-#endif
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2
+				.ext_clk_freq_hz = 0,
+			#endif
 
         },
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
             .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
             .slot_mode = I2S_SLOT_MODE_MONO,
-            .slot_mask = spk_slot_mask,
+            .slot_mask = (spk_slot_mask == I2S_STD_SLOT_RIGHT) ? I2S_STD_SLOT_RIGHT : I2S_STD_SLOT_LEFT,
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-#if SOC_I2S_HW_VERSION_2
-            .left_align = true,
-            .big_endian = false,
-            .bit_order_lsb = false
-#endif
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
 
         },
         .gpio_cfg = {
@@ -206,7 +207,18 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
     chan_cfg.id = XIAOZHI_I2S_PORT(1);
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
     std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
-    std_cfg.slot_cfg.slot_mask = mic_slot_mask;
+    if (mic_slot_mask == I2S_STD_SLOT_BOTH) {
+        mic_is_stereo_ = true;
+        std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_STEREO;
+        std_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+        gpio_pullup_dis(mic_din);
+        gpio_pulldown_en(mic_din);
+        ESP_LOGI(TAG, "Simplex MIC configured for DUAL/STEREO capture with auto-sensing (1-mic or 2-mic)");
+    } else {
+        mic_is_stereo_ = false;
+        std_cfg.slot_cfg.slot_mode = I2S_SLOT_MODE_MONO;
+        std_cfg.slot_cfg.slot_mask = mic_slot_mask;
+    }
     std_cfg.gpio_cfg.bclk = mic_sck;
     std_cfg.gpio_cfg.ws = mic_ws;
     std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
@@ -217,42 +229,196 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
 
 int NoAudioCodec::Write(const int16_t* data, int samples) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
-    std::vector<int32_t> buffer(samples);
+    if (!output_enabled_ || tx_handle_ == nullptr || samples <= 0) {
+        return 0;
+    }
+    if (tx_buffer_.size() < (size_t)samples) {
+        tx_buffer_.resize(samples);
+    }
 
     // output_volume_: 0-100
     // volume_factor_: 0-65536
-    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+    double vol = double(output_volume_) / 100.0;
+    int32_t volume_factor = static_cast<int32_t>(vol * vol * 65536.0);
     for (int i = 0; i < samples; i++) {
-        int64_t temp = int64_t(data[i]) * volume_factor; // 使用 int64_t 进行乘法运算
+        int64_t temp = int64_t(data[i]) * volume_factor;
         if (temp > INT32_MAX) {
-            buffer[i] = INT32_MAX;
+            tx_buffer_[i] = INT32_MAX;
         } else if (temp < INT32_MIN) {
-            buffer[i] = INT32_MIN;
+            tx_buffer_[i] = INT32_MIN;
         } else {
-            buffer[i] = static_cast<int32_t>(temp);
+            tx_buffer_[i] = static_cast<int32_t>(temp);
         }
     }
 
-    size_t bytes_written;
-    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
+    size_t bytes_written = 0;
+    esp_err_t err = i2s_channel_write(tx_handle_, tx_buffer_.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+    if (err != ESP_OK) {
+        return 0;
+    }
     return bytes_written / sizeof(int32_t);
 }
 
 int NoAudioCodec::Read(int16_t* dest, int samples) {
+    if (!input_enabled_ || rx_handle_ == nullptr || samples <= 0) {
+        return 0;
+    }
     size_t bytes_read;
     constexpr uint32_t kReadTimeoutMs = 200;
 
-    std::vector<int32_t> bit32_buffer(samples);
-    if (i2s_channel_read(rx_handle_, bit32_buffer.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+    if (mic_is_stereo_) {
+        if (rx_buffer_.size() < (size_t)(samples * 2)) {
+            rx_buffer_.resize(samples * 2);
+        }
+        if (i2s_channel_read(rx_handle_, rx_buffer_.data(), samples * 2 * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+            return 0;
+        }
+
+        int pairs = bytes_read / (2 * sizeof(int32_t));
+        if (pairs <= 0) {
+            return 0;
+        }
+
+        // Auto-detect keberadaan mic Kiri dan Kanan pada ~30 frame pertama
+        if (detect_frames_ > 0) {
+            detect_frames_--;
+            int64_t raw_l = 0, raw_r = 0;
+            for (int i = 0; i < pairs; i++) {
+                raw_l += (rx_buffer_[2 * i] >> mic_shift_);
+                raw_r += (rx_buffer_[2 * i + 1] >> mic_shift_);
+            }
+            int32_t mean_l = raw_l / pairs;
+            int32_t mean_r = raw_r / pairs;
+
+            int32_t peak_ac_l = 0, peak_ac_r = 0;
+            for (int i = 0; i < pairs; i++) {
+                int32_t ac_l = std::abs((rx_buffer_[2 * i] >> mic_shift_) - mean_l);
+                int32_t ac_r = std::abs((rx_buffer_[2 * i + 1] >> mic_shift_) - mean_r);
+                if (ac_l > peak_ac_l) peak_ac_l = ac_l;
+                if (ac_r > peak_ac_r) peak_ac_r = ac_r;
+            }
+            if (peak_ac_l > 350) {
+                has_left_mic_ = true;
+            }
+            if (peak_ac_r > 350) {
+                has_right_mic_ = true;
+            }
+            if (detect_frames_ == 0) {
+                if (!has_left_mic_ && !has_right_mic_) {
+                    has_left_mic_ = true;
+                }
+                ESP_LOGI(TAG, "Mic Auto-Detection: Left=%s, Right=%s -> Hardware: %s, Selected Mode: %s",
+                         has_left_mic_ ? "Detected" : "None",
+                         has_right_mic_ ? "Detected" : "None",
+                         (has_left_mic_ && has_right_mic_) ? "Dual Mic" : "Single Mic",
+                         mic_mode_.c_str());
+            }
+        }
+
+        for (int i = 0; i < pairs; i++) {
+            int32_t l = rx_buffer_[2 * i] >> mic_shift_;
+            int32_t r = rx_buffer_[2 * i + 1] >> mic_shift_;
+            int32_t value;
+
+            if (mic_mode_ == "blend") {
+                if (has_left_mic_ && has_right_mic_) {
+                    value = (l + r) / 2;
+                } else if (has_right_mic_) {
+                    value = r;
+                } else {
+                    value = l;
+                }
+            } else if (mic_mode_ == "right") {
+                value = r;
+            } else {
+                // "primary" / "left" (Default):
+                // Menggunakan mikrofon tunggal bersih tanpa cacat fase (comb-filtering)
+                // Menghilangkan suara cempreng/hampa di kaleng sehingga akurasi AI maksimal!
+                if (has_left_mic_) {
+                    value = l;
+                } else if (has_right_mic_) {
+                    value = r;
+                } else {
+                    value = l;
+                }
+            }
+            dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+        }
+        return pairs;
+    } else {
+        if (rx_buffer_.size() < (size_t)samples) {
+            rx_buffer_.resize(samples);
+        }
+        if (i2s_channel_read(rx_handle_, rx_buffer_.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+            return 0;
+        }
+
+        samples = bytes_read / sizeof(int32_t);
+        for (int i = 0; i < samples; i++) {
+            int32_t value = rx_buffer_[i] >> mic_shift_;
+            dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+        }
+        return samples;
+    }
+}
+
+int NoAudioCodec::ReadStereo(int16_t* left_dest, int16_t* right_dest, int samples) {
+    if (!input_enabled_ || rx_handle_ == nullptr || samples <= 0) {
         return 0;
     }
+    size_t bytes_read = 0;
+    constexpr uint32_t kReadTimeoutMs = 100;
 
-    samples = bytes_read / sizeof(int32_t);
-    for (int i = 0; i < samples; i++) {
-        int32_t value = bit32_buffer[i] >> 12;
-        dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    if (mic_is_stereo_) {
+        if (rx_buffer_.size() < (size_t)(samples * 2)) {
+            rx_buffer_.resize(samples * 2);
+        }
+        if (i2s_channel_read(rx_handle_, rx_buffer_.data(), samples * 2 * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+            return 0;
+        }
+
+        int pairs = bytes_read / (2 * sizeof(int32_t));
+        for (int i = 0; i < pairs; i++) {
+            int32_t l = rx_buffer_[2 * i] >> mic_shift_;
+            int32_t r = rx_buffer_[2 * i + 1] >> mic_shift_;
+            if (left_dest) {
+                left_dest[i] = (l > INT16_MAX) ? INT16_MAX : (l < -INT16_MAX) ? -INT16_MAX : (int16_t)l;
+            }
+            if (right_dest) {
+                right_dest[i] = (r > INT16_MAX) ? INT16_MAX : (r < -INT16_MAX) ? -INT16_MAX : (int16_t)r;
+            }
+        }
+        return pairs;
+    } else {
+        if (rx_buffer_.size() < (size_t)samples) {
+            rx_buffer_.resize(samples);
+        }
+        if (i2s_channel_read(rx_handle_, rx_buffer_.data(), samples * sizeof(int32_t), &bytes_read, kReadTimeoutMs) != ESP_OK) {
+            return 0;
+        }
+        int s = bytes_read / sizeof(int32_t);
+        for (int i = 0; i < s; i++) {
+            int32_t val = rx_buffer_[i] >> mic_shift_;
+            int16_t v = (val > INT16_MAX) ? INT16_MAX : (val < -INT16_MAX) ? -INT16_MAX : (int16_t)val;
+            if (left_dest) left_dest[i] = v;
+            if (right_dest) right_dest[i] = 0;
+        }
+        return s;
     }
-    return samples;
+}
+
+void NoAudioCodec::Start() {
+    AudioCodec::Start();
+    Settings settings("audio", false);
+    mic_shift_ = settings.GetInt("mic_shift", 13);
+    if (mic_shift_ < 0 || mic_shift_ > 24) {
+        mic_shift_ = 13;
+    }
+    mic_mode_ = settings.GetString("mic_mode", "primary");
+    has_left_mic_ = false;
+    has_right_mic_ = false;
+    detect_frames_ = 30;
+    ESP_LOGI(TAG, "NoAudioCodec started, mic_shift=%d, mic_stereo=%d, mic_mode=%s", mic_shift_, mic_is_stereo_, mic_mode_.c_str());
 }
 
 void NoAudioCodec::EnableInput(bool enable) {
@@ -306,10 +472,10 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
         .clk_cfg = {
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
-#if SOC_I2S_HW_VERSION_2
-            .ext_clk_freq_hz = 0,
-#endif
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+			#ifdef   I2S_HW_VERSION_2
+				.ext_clk_freq_hz = 0,
+			#endif
 
         },
         .slot_cfg = {
@@ -320,11 +486,11 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-#if SOC_I2S_HW_VERSION_2
-            .left_align = true,
-            .big_endian = false,
-            .bit_order_lsb = false
-#endif
+            #ifdef   I2S_HW_VERSION_2
+                .left_align = true,
+                .big_endian = false,
+                .bit_order_lsb = false
+            #endif
 
         },
         .gpio_cfg = {
