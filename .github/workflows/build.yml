@@ -7,11 +7,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.5.1
-          target: esp32s3
-          command: python scripts/build.py esp32s3-cam-st7789 --name esp32s3-cam-st7789-240x280
+      - name: Sisakan hanya board kamu
+        run: |
+          cd main/boards
+          find . -mindepth 1 -maxdepth 1 ! -name common ! -name esp32s3-cam-st7789 -exec rm -rf {} +
+          ls
+      - name: Build
+        run: |
+          docker run --rm -v "$PWD:/project" -w /project -e HOME=/tmp espressif/idf:v5.5.1 \
+            bash -c "git config --global --add safe.directory '*' && python3 scripts/build.py esp32s3-cam-st7789 --name esp32s3-cam-st7789-240x280"
       - uses: actions/upload-artifact@v4
         with:
           name: firmware
