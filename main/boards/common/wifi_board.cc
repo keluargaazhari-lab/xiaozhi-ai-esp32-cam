@@ -1,5 +1,4 @@
 #include "wifi_board.h"
-#include "portal_settings.h"
 
 #include "display.h"
 #include "application.h"
@@ -10,6 +9,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_network.h>
+#include <esp_wifi.h>
 #include <esp_log.h>
 #include <esp_mac.h>
 #include <utility>
@@ -57,7 +57,8 @@ void WifiBoard::StartNetwork() {
     WifiManagerConfig config;
     config.ssid_prefix = "Xiaozhi";
     config.language = Lang::CODE;
-    config.advanced_groups = MakeXiaozhiPortalSettings();
+    config.show_ota_config = true;
+    config.show_sleep_config = true;
 
     // Set a DHCP hostname so the router shows a friendly name instead of "espressif".
     // Uses the same "<prefix>-<last 2 MAC bytes>" scheme as the config AP SSID.
@@ -125,6 +126,8 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 #endif
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
+            esp_wifi_set_ps(WIFI_PS_NONE);
+            ESP_LOGI(TAG, "WiFi power save set to WIFI_PS_NONE for low-jitter audio");
             break;
         case NetworkEvent::Scanning:
             ESP_LOGI(TAG, "WiFi scanning");
@@ -315,9 +318,23 @@ std::string WifiBoard::GetDeviceStatusJson() {
     if (auto display = board.GetDisplay(); display && display->height() > 64) {
         if (auto theme = display->GetTheme()) {
             cJSON_AddStringToObject(screen, "theme", theme->name().c_str());
+            cJSON_AddStringToObject(screen, "background_color", theme->name().c_str());
         }
+        int ui_theme_id = display->GetUiThemeId();
+        cJSON_AddNumberToObject(screen, "ui_theme_id", ui_theme_id);
+        cJSON_AddStringToObject(screen, "ui_theme", ui_theme_id == 2 ? "Thema 2 (Tampilan Chat Bubble WeChat)" : "Thema 1 (Tampilan Default Robot)");
+        cJSON_AddBoolToObject(screen, "is_st7789", display->IsSt7789());
+        cJSON_AddNumberToObject(screen, "rotation", board.GetDisplayRotation());
     }
     cJSON_AddItemToObject(root, "screen", screen);
+
+    // Camera
+    if (auto camera = board.GetCamera()) {
+        auto cam_obj = cJSON_CreateObject();
+        cJSON_AddBoolToObject(cam_obj, "hmirror", camera->IsHMirror());
+        cJSON_AddBoolToObject(cam_obj, "vflip", camera->IsVFlip());
+        cJSON_AddItemToObject(root, "camera", cam_obj);
+    }
 
     // Battery
     int level = 0;
@@ -326,6 +343,7 @@ std::string WifiBoard::GetDeviceStatusJson() {
         auto battery = cJSON_CreateObject();
         cJSON_AddNumberToObject(battery, "level", level);
         cJSON_AddBoolToObject(battery, "charging", charging);
+        cJSON_AddStringToObject(battery, "status", charging ? "charging" : "discharging");
         cJSON_AddItemToObject(root, "battery", battery);
     }
 
@@ -344,10 +362,13 @@ std::string WifiBoard::GetDeviceStatusJson() {
     if (board.GetTemperature(temp)) {
         auto chip = cJSON_CreateObject();
         cJSON_AddNumberToObject(chip, "temperature", temp);
-        cJSON_AddItemToObject(root, "chip", chip);
     }
 
-    AddSystemStatus(root);
+    // Wake word info
+    auto wake_word = cJSON_CreateObject();
+    cJSON_AddStringToObject(wake_word, "active_wake_word", "Hi Jason");
+    cJSON_AddStringToObject(wake_word, "supported_wake_words", "Hi Jason, Jarvis, Alexa, Computer, Hi ESP, Hey Willow, Sophia, Mycroft, Hey Wanda, Hi Andy, Hey Ivy, Ni Hao Xiao Zhi");
+    cJSON_AddItemToObject(root, "wake_word", wake_word);
 
     auto str = cJSON_PrintUnformatted(root);
     std::string result(str);
