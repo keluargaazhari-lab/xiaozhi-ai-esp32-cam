@@ -29,15 +29,23 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
 void AudioCodec::Start() {
     Settings settings("audio", false);
     output_volume_ = settings.GetInt("output_volume", output_volume_);
-    if (output_volume_ <= 0) {
-        ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
-        output_volume_ = 10;
+    if (output_volume_ < 0) {
+        output_volume_ = 0;
+    }
+    if (output_volume_ > 100) {
+        output_volume_ = 100;
     }
 
-    ESP_LOGI(TAG, "Audio codec started");
+    ESP_LOGI(TAG, "Audio codec started (volume=%d)", output_volume_);
 }
 
 void AudioCodec::SetOutputVolume(int volume) {
+    if (volume < 0) {
+        volume = 0;
+    }
+    if (volume > 100) {
+        volume = 100;
+    }
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
     
@@ -64,4 +72,14 @@ void AudioCodec::EnableOutput(bool enable) {
     }
     output_enabled_ = enable;
     ESP_LOGI(TAG, "Set output enable to %s", enable ? "true" : "false");
+}
+
+int AudioCodec::ReadStereo(int16_t* left_dest, int16_t* right_dest, int samples) {
+    std::vector<int16_t> mono(samples);
+    int n = Read(mono.data(), samples);
+    for (int i = 0; i < n; i++) {
+        if (left_dest) left_dest[i] = mono[i];
+        if (right_dest) right_dest[i] = mono[i];
+    }
+    return n;
 }

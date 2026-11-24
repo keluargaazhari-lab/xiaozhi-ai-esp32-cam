@@ -12,7 +12,7 @@
 
 #include "board.h"
 
-#define AUDIO_CODEC_DMA_DESC_NUM 6
+#define AUDIO_CODEC_DMA_DESC_NUM 8
 #define AUDIO_CODEC_DMA_FRAME_NUM 240
 
 // ESP-IDF 6 removed i2s_port_t and changed i2s_chan_config_t::id to an integer.
@@ -48,6 +48,8 @@ public:
     inline float input_gain() const { return input_gain_; }
     inline bool input_enabled() const { return input_enabled_; }
     inline bool output_enabled() const { return output_enabled_; }
+    virtual bool is_dual_mic() const { return false; }
+    virtual int ReadStereo(int16_t* left_dest, int16_t* right_dest, int samples);
 
 protected:
     i2s_chan_handle_t tx_handle_ = nullptr;
@@ -61,7 +63,7 @@ protected:
     int output_sample_rate_ = 0;
     int input_channels_ = 1;
     int output_channels_ = 1;
-    int output_volume_ = 70;
+    int output_volume_ = 40;
     float input_gain_ = 0.0;
 
     virtual int Read(int16_t* dest, int samples) = 0;
