@@ -12,9 +12,12 @@
 
 class LvglTheme : public Theme {
 public:
+    static bool TryParseColor(const std::string& color, lv_color_t* out);
     static lv_color_t ParseColor(const std::string& color);
+    static std::string FormatHex(lv_color_t color);
 
     LvglTheme(const std::string& name);
+    void ApplySolidBackground(lv_color_t bg);
 
     // Properties
     inline lv_color_t background_color() const { return background_color_; }
@@ -29,7 +32,6 @@ public:
     inline std::shared_ptr<LvglImage> background_image() const { return background_image_; }
     inline std::shared_ptr<EmojiCollection> emoji_collection() const { return emoji_collection_; }
     inline std::shared_ptr<LvglFont> text_font() const { return text_font_; }
-    virtual std::shared_ptr<LvglFont> GetTextFont() const override { return text_font_; }
     inline std::shared_ptr<LvglFont> icon_font() const { return icon_font_; }
     inline std::shared_ptr<LvglFont> large_icon_font() const { return large_icon_font_; }
     inline std::shared_ptr<LvglFont> emoji_font() const { return emoji_font_; }
